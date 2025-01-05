@@ -178,6 +178,46 @@ impl Database {
         Ok(logs)
     }
 
+    pub async fn get_all_latest_issue_logs(&self) -> Result<Vec<IssueLog>, DatabaseError> {
+        let query = "
+            SELECT *
+            FROM (
+                SELECT *,
+                    ROW_NUMBER() OVER (PARTITION BY key ORDER BY updated_at DESC) as rn
+                FROM issues
+            ) ranked
+            WHERE rn = 1
+        ";
+        
+        let logs = self
+            .connection
+            .call(|conn| {
+                let mut stmt = conn
+                    .prepare_cached(query)
+                    .map_err(|e| tokio_rusqlite::Error::Rusqlite(e))?;
+
+                let rows = stmt
+                    .query_map([], |row| {
+                        Ok(IssueLog {
+                            key: row.get("key")?,
+                            summary: row.get("summary")?,
+                            epic_key: row.get("epic_key")?,
+                            time_estimate: row.get("time_estimate")?,
+                            time_spent: row.get("time_spent")?,
+                            updated_at: row.get("updated_at")?,
+                            assignee: row.get("assignee")?,
+                        })
+                    })
+                    .map_err(|e| tokio_rusqlite::Error::Rusqlite(e))?;
+
+                rows.collect::<Result<Vec<_>, _>>()
+                    .map_err(|e| tokio_rusqlite::Error::Rusqlite(e))
+            })
+            .await?;
+
+        Ok(logs)
+    }
+
     pub async fn get_epics(&self) -> Result<Vec<Epic>, DatabaseError> {
         const QUERY: &str = r#"
             SELECT 
